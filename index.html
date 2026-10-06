@@ -117,7 +117,7 @@ footer{padding:50px 0 70px;color:var(--muted);font-size:12px}
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
 <script src="config.js"></script>
 <script>
 const sections = [
@@ -414,7 +414,7 @@ async function toggle(key){
   if(!sb||!currentUser)return;
   syncing=true;setSyncStatus("Saving…");
   const payload={task_key:key,completed:next,completed_by:currentUser.id,completed_by_email:currentUser.email||"",completed_at:new Date().toISOString()};
-  const {error}=next?await sb.from("primefit_task_progress").upsert(payload,{onConflict:"task_key"}):await sb.from("primefit_task_progress").delete().eq("task_key",key);
+  const {error}=next?await sb.from("primefit_task_progress").upsert(payload,{onConflict:"workspace_id,task_key"}):await sb.from("primefit_task_progress").delete().eq("task_key",key);
   syncing=false;
   if(error){alert(error.message);state.done[key]=!next;saveLocal();render();setSyncStatus("Sync error");return;}
   setSyncStatus("Live sync",true);
