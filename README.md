@@ -29,3 +29,6 @@ This version is intentionally simple for a small private team: create the team a
 ## Local fallback
 
 Without Supabase configuration, the checklist still works in local-only mode using browser storage.
+
+### Current Supabase project
+The app is configured for the PrimeFit Launch workspace. The browser uses the Supabase **publishable** key only; never put a service-role/secret key in the repository.
