@@ -421,7 +421,7 @@ async function toggle(key){
   state.done[key]=next;saveLocal();render();
   if(!sb||!currentUser)return;
   syncing=true;setSyncStatus("Saving…");
-  const payload={task_key:key,completed:next,completed_by:currentUser.id,completed_by_email:currentUser.email||"",completed_at:new Date().toISOString()};
+  const payload={workspace_id:WORKSPACE_ID,task_key:key,completed:next,completed_by:currentUser.id,completed_by_email:currentUser.email||"",completed_at:new Date().toISOString()};
   const {error}=next?await sb.from("primefit_task_progress").upsert(payload,{onConflict:"workspace_id,task_key"}):await sb.from("primefit_task_progress").delete().eq("workspace_id",WORKSPACE_ID).eq("task_key",key);
   syncing=false;
   if(error){alert(error.message);state.done[key]=!next;saveLocal();render();setSyncStatus("Sync error");return;}
