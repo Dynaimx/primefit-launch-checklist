@@ -329,6 +329,7 @@ const sections = [
 const STORAGE="primefit_launch_v1";
 const SUPABASE_URL=window.PRIMEFIT_SUPABASE_URL||"";
 const SUPABASE_ANON_KEY=window.PRIMEFIT_SUPABASE_ANON_KEY||"";
+const WORKSPACE_ID="11111111-1111-4111-8111-111111111111";
 const supabaseReady=!!(window.supabase&&SUPABASE_URL&&SUPABASE_ANON_KEY);
 const sb=supabaseReady?window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
 let state=JSON.parse(localStorage.getItem(STORAGE)||'{"done":{},"notes":""}');
@@ -360,8 +361,15 @@ async function signIn(){
   if(data?.user){closeAuth();await startCloud(data.user);}
 }
 async function signOut(){if(sb)await sb.auth.signOut();currentUser=null;setSyncStatus("Local mode");document.getElementById("authBtn").textContent="Sign in";if(realtimeChannel){await sb.removeChannel(realtimeChannel);realtimeChannel=null;}render();}
+async function ensureMembership(){
+  if(!sb||!currentUser)return false;
+  const {error}=await sb.from("primefit_members").insert({workspace_id:WORKSPACE_ID,user_id:currentUser.id,role:"member"});
+  if(error && error.code!=="23505"){console.error(error);return false;}
+  return true;
+}
 async function startCloud(user){
   currentUser=user;
+  await ensureMembership();
   document.getElementById("authBtn").textContent=(user.email||"Account")+" · Sign out";
   document.getElementById("authBtn").onclick=signOut;
   setSyncStatus("Syncing…");
@@ -374,8 +382,8 @@ async function startCloud(user){
 async function loadCloud(){
   if(!sb)return;
   const [{data:rows,error:e1},{data:note,error:e2}]=await Promise.all([
-    sb.from("primefit_task_progress").select("task_key,completed,completed_by_email,completed_at"),
-    sb.from("primefit_notes").select("id,notes").eq("id",1).maybeSingle()
+    sb.from("primefit_task_progress").select("task_key,completed,completed_by_email,completed_at").eq("workspace_id",WORKSPACE_ID),
+    sb.from("primefit_notes").select("workspace_id,notes").eq("workspace_id",WORKSPACE_ID).maybeSingle()
   ]);
   if(e1){setSyncStatus("Sync error");console.error(e1);return;}
   cloud.done={};(rows||[]).forEach(r=>{if(r.completed)cloud.done[r.task_key]=true;});
@@ -387,8 +395,8 @@ async function subscribeRealtime(){
   if(!sb)return;
   if(realtimeChannel)await sb.removeChannel(realtimeChannel);
   realtimeChannel=sb.channel("primefit-live")
-    .on("postgres_changes",{event:"*",schema:"public",table:"primefit_task_progress"},async()=>{await loadCloud();render();})
-    .on("postgres_changes",{event:"*",schema:"public",table:"primefit_notes"},async()=>{await loadCloud();render();})
+    .on("postgres_changes",{event:"*",schema:"public",table:"primefit_task_progress",filter:"workspace_id=eq."+WORKSPACE_ID},async()=>{await loadCloud();render();})
+    .on("postgres_changes",{event:"*",schema:"public",table:"primefit_notes",filter:"workspace_id=eq."+WORKSPACE_ID},async()=>{await loadCloud();render();})
     .subscribe();
 }
 async function maybeOfferMigration(){
@@ -403,9 +411,9 @@ async function maybeOfferMigration(){
 async function importLocalProgress(old){
   if(!sb||!currentUser)return;
   setSyncStatus("Importing…");
-  const rows=Object.keys(old.done||{}).filter(k=>old.done[k]).map(key=>({task_key:key,completed:true,completed_by:currentUser.id,completed_by_email:currentUser.email||"",completed_at:new Date().toISOString()}));
-  if(rows.length){const {error}=await sb.from("primefit_task_progress").upsert(rows,{onConflict:"task_key"});if(error){alert(error.message);setSyncStatus("Sync error");return;}}
-  if(old.notes){await sb.from("primefit_notes").upsert({id:1,notes:old.notes,updated_by:currentUser.id,updated_at:new Date().toISOString()});}
+  const rows=Object.keys(old.done||{}).filter(k=>old.done[k]).map(key=>({workspace_id:WORKSPACE_ID,task_key:key,completed:true,completed_by:currentUser.id,completed_by_email:currentUser.email||"",completed_at:new Date().toISOString()}));
+  if(rows.length){const {error}=await sb.from("primefit_task_progress").upsert(rows,{onConflict:"workspace_id,task_key"});if(error){alert(error.message);setSyncStatus("Sync error");return;}}
+  if(old.notes){await sb.from("primefit_notes").upsert({workspace_id:WORKSPACE_ID,notes:old.notes,updated_by:currentUser.id,updated_at:new Date().toISOString()},{onConflict:"workspace_id"});}
   await loadCloud();render();setSyncStatus("Live sync",true);
 }
 async function toggle(key){
@@ -414,7 +422,7 @@ async function toggle(key){
   if(!sb||!currentUser)return;
   syncing=true;setSyncStatus("Saving…");
   const payload={task_key:key,completed:next,completed_by:currentUser.id,completed_by_email:currentUser.email||"",completed_at:new Date().toISOString()};
-  const {error}=next?await sb.from("primefit_task_progress").upsert(payload,{onConflict:"workspace_id,task_key"}):await sb.from("primefit_task_progress").delete().eq("task_key",key);
+  const {error}=next?await sb.from("primefit_task_progress").upsert(payload,{onConflict:"workspace_id,task_key"}):await sb.from("primefit_task_progress").delete().eq("workspace_id",WORKSPACE_ID).eq("task_key",key);
   syncing=false;
   if(error){alert(error.message);state.done[key]=!next;saveLocal();render();setSyncStatus("Sync error");return;}
   setSyncStatus("Live sync",true);
@@ -452,7 +460,7 @@ function closeNotes(){document.getElementById("modal").classList.remove("open");
 async function saveNotes(){
   state.notes=document.getElementById("notes").value;saveLocal();closeNotes();render();
   if(!sb||!currentUser){return;}
-  setSyncStatus("Saving…");const {error}=await sb.from("primefit_notes").upsert({id:1,notes:state.notes,updated_by:currentUser.id,updated_at:new Date().toISOString()});
+  setSyncStatus("Saving…");const {error}=await sb.from("primefit_notes").upsert({workspace_id:WORKSPACE_ID,notes:state.notes,updated_by:currentUser.id,updated_at:new Date().toISOString()},{onConflict:"workspace_id"});
   if(error){alert(error.message);setSyncStatus("Sync error");}else setSyncStatus("Live sync",true);
 }
 async function resetProgress(){
@@ -460,8 +468,8 @@ async function resetProgress(){
   state={done:{},notes:""};saveLocal();render();
   if(!sb||!currentUser)return;
   setSyncStatus("Resetting…");
-  const e1=await sb.from("primefit_task_progress").delete().neq("task_key","");
-  const e2=await sb.from("primefit_notes").upsert({id:1,notes:"",updated_by:currentUser.id,updated_at:new Date().toISOString()});
+  const e1=await sb.from("primefit_task_progress").delete().eq("workspace_id",WORKSPACE_ID);
+  const e2=await sb.from("primefit_notes").upsert({workspace_id:WORKSPACE_ID,notes:"",updated_by:currentUser.id,updated_at:new Date().toISOString()},{onConflict:"workspace_id"});
   if(e1.error||e2.error){alert((e1.error||e2.error).message);setSyncStatus("Sync error");}else{await loadCloud();render();setSyncStatus("Live sync",true);}
 }
 function exportProgress(){
